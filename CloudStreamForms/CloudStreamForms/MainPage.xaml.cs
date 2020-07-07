@@ -3,6 +3,8 @@ using GoogleCast.Channels;
 using GoogleCast.Models.Media;
 using Jint;
 using Newtonsoft.Json;
+using SubtitlesParser.Classes;
+using SubtitlesParser.Classes.Parsers;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -11,6 +13,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -341,6 +344,76 @@ namespace CloudStreamForms
 
     public static class MainChrome
     {
+        public static string GetLocalIPAddress()
+        {
+            var host = Dns.GetHostEntry(Dns.GetHostName());
+            foreach (var ip in host.AddressList) {
+                if (ip.AddressFamily == AddressFamily.InterNetwork) {
+                    return ip.ToString();
+                }
+            }
+            throw new Exception("No network adapters with an IPv4 address in the system!");
+        }
+
+        public static string SubData = "";
+        public static bool isSubActive = false;
+
+        public static string CreateSubListiner(string sub)
+        {
+            if (!sub.IsClean()) return "";
+            string url = $"http://{GetLocalIPAddress()}:1234/sub.vtt/";
+            SubData = sub;
+            if (isSubActive) return url;
+            isSubActive = true;
+
+            var thread = CloudStreamCore.mainCore.CreateThread(77);
+            mainCore.StartThread("SubThread", () => {
+                try {
+                    using (var listener = new HttpListener()) {
+                        listener.Prefixes.Add(url);
+
+                        listener.Start();
+
+                        while (true) {
+                            if (!mainCore.GetThredActive(thread)) {
+                                print("ABORT!!!!!!!!!!!!");
+                                return;
+                            }
+                            print("Listening...");
+
+                            HttpListenerContext context = listener.GetContext();
+                            HttpListenerRequest request = context.Request;
+
+                            using (HttpListenerResponse response = context.Response) {
+                                response.ContentType = "text/vtt";
+                                response.StatusCode = 200;
+                                response.AppendHeader("access-control-expose-headers", "Content-Length, Date, Server, Transfer-Encoding, X-GUploader-UploadID, X-Google-Trace, origin, range");
+                                response.AppendHeader("access-control-allow-origin", "*");
+                                response.AppendHeader("accept-ranges", "bytes");
+                                if (request.HttpMethod == "OPTIONS") {
+                                    response.AddHeader("Access-Control-Allow-Headers", "Content-Type, Accept, X-Requested-With");
+                                    response.AddHeader("Access-Control-Allow-Methods", "GET, POST");
+                                    response.AddHeader("Access-Control-Max-Age", "1728000");
+                                }
+
+                                string responseString = SubData;
+                                byte[] buffer = System.Text.Encoding.UTF8.GetBytes(responseString);
+                                response.ContentLength64 = buffer.Length;
+                                using (var output = response.OutputStream) {
+                                    output.Write(buffer, 0, buffer.Length);
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception _ex) {
+                    print("MAMAMMAMAMMAMAMMAMA: " + _ex);
+                }
+            });
+            return url;
+        }
+
+
         public static event EventHandler OnDisconnected;
         public static event EventHandler<bool> OnVideoCastingChanged;
         public static event EventHandler OnConnected;
@@ -597,47 +670,166 @@ namespace CloudStreamForms
         }
 
         static Dictionary<string, string> subtitleParsed = new Dictionary<string, string>();
+        static bool ContainsStartColor(string inp)
+        {
+            return inp.Contains("<font color=");
+        }
+        public static List<SubtitleItem> ParseSubtitles(string _inp)
+        {
+            var parser = GetSubtiteParser(_inp);
+            byte[] byteArray = Encoding.UTF8.GetBytes(_inp);
+            MemoryStream stream = new MemoryStream(byteArray);
+            return parser.ParseStream(stream, Encoding.UTF8).Select(t => {
+
+                // REMOVE BLOAT
+                for (int i = 0; i < t.Lines.Count; i++) {
+                    var inp = t.Lines[i];
+                    while (ContainsStartColor(inp)) {
+                        t.Lines[i] = inp.Replace($"<font color=\"{FindHTML(inp, "<font color=\"", "\"")}\">", "");
+                    }
+                }
+
+                t.Lines = t.Lines.Select(_t => _t.Replace("<i>", "").Replace("{i}", "").Replace("<b>", "").Replace("{b}", "").Replace("<u>", "").Replace("{u}", "").Replace("</i>", "").Replace("{/i}", "").Replace("</b>", "").Replace("{/b}", "").Replace("</u>", "").Replace("{/u}", "").Replace("</font>", "")).ToList();
+                return t;
+            }).ToList();
+        }
+
+        public static ISubtitlesParser GetSubtiteParser(string _inp)
+        {
+            while (_inp.StartsWith(" ") || _inp.StartsWith("\n")) {
+                _inp = _inp.Remove(0, 1);
+            }
+
+            if (_inp.StartsWith("[INFORMATION]")) {
+                return new SubViewerParser();
+            }
+            else if (_inp.StartsWith("WEBVTT")) {
+                return new VttParser();
+            }
+            else if (_inp.StartsWith("<?xml version=\"")) {
+                return new TtmlParser();
+            }
+            else if (_inp.StartsWith("[Script Info]") || _inp.StartsWith("Title:")) {
+                return new SsaParser();
+            }
+            else if (_inp.StartsWith("1")) {
+                return new SrtParser();
+            }
+            else if (_inp.StartsWith("0:00")) {
+                return new YtXmlFormatParser();
+            }
+            else {
+                return new SrtParser();
+            }
+        }
+
+        /// <summary>
+        /// Generates a link for subtitles, If it is the first time it will create a thread on Id77 
+        /// </summary>
+        /// <param name="data">subtitledata in any major format</param>
+        /// <param name="offset">offset im ms</param>
+        /// <returns></returns>
+        public static string GenerateSubUrl(string data, int offset = 0)
+        {
+            if (data == null) return "";
+
+            string realSubText = "";
+            if (data != "") {
+                try {
+                    var _sub = ParseSubtitles(data).ToArray();
+                    print("SUBLENNN::: " + _sub);
+                    realSubText += "WEBVTT\n\n";
+                    string ToSubTime(int tick)
+                    {
+                        if (tick < 0) {
+                            tick = 0;
+                        }
+
+                        var str = TimeSpan.FromMilliseconds(tick).ToString();
+                        if (str.Length == 8) {
+                            str += ".";
+                        }
+                        int reqLen = Math.Max(0, 12 - str.Length);
+                        if (reqLen > 0) {
+                            str += MultiplyString("0", reqLen);
+                        }
+                        return str.Substring(0, 12);
+                    }
+
+                    for (int i = 0; i < _sub.Length; i++) {
+                        realSubText += (i + 1).ToString() + "\n";
+                        realSubText += ToSubTime(_sub[i].StartTime + offset) + " --> " + ToSubTime(_sub[i].EndTime + offset) + "\n";
+                        foreach (var line in _sub[i].Lines) {
+                            realSubText += line + "\n";
+                        }
+                        realSubText += "\n";
+                    }
+                    print("DDADADAA");
+                }
+                catch (Exception _ex) {
+                    print("MINNNNN EX: " + _ex);
+                    return "";
+                }
+            }
+            return CreateSubListiner(realSubText);
+        }
+
+        /*
+        public static async Task ToggleSubtitles(bool isEnabled, string lang = null)
+        { 
+        }*/
+
+        public static async Task<bool> ChangeSubtitles(string subFile, string name, int delay = 0)
+        {
+            bool suc = await CastVideo(currentUrl, currentMirrorName, -2, subFile, name, currentPosterUrl, currentMovieName, delay);
+            /*if (suc) {
+                await ToggleSubtitles(true);
+            }*/
+            return suc;
+        }
+
+        static string currentUrl = "";
+        static string currentMirrorName = "";
+        static string currentPosterUrl = "";
+        static string currentMovieName = "";
 
         // Subtitle Url https://static.movies123.pro/files/tracks/JhUzWRukqeuUdRrPCe0R3lUJ1SmknAVSv670Ep0cXipm1JfMgNWa379VKKAz8nvFMq2ksu7bN5tCY5tXXKS4Lrr1tLkkipdLJNArNzVSu2g.srt
-        public static async Task<bool> CastVideo(string url, string mirrorName, double setTime = -1, string subtitleUrl = "", string subtitleName = "", string posterUrl = "", string movieTitle = "")
+        public static async Task<bool> CastVideo(string url, string mirrorName, double setTime = -1, string subtitleUrl = "", string subtitleName = "", string posterUrl = "", string movieTitle = "", int subtitleDelay = 0)
         {
             try {
                 if (setTime == -2) {
                     setTime = CurrentTime;
                 }
 
+                currentUrl = url;
+                currentMirrorName = mirrorName;
+                currentPosterUrl = posterUrl;
+                currentMovieName = movieTitle;
+
                 GenericMediaMetadata mediaMetadata = new GenericMediaMetadata();
                 RequestNextTime = setTime;
 
                 bool validSubtitle = false;
                 var mediaInfo = new MediaInformation() { ContentId = url, Metadata = mediaMetadata };
+                print("REALLSLSLLS:: " + subtitleUrl);
+
+                string realSub = GenerateSubUrl(subtitleUrl,subtitleDelay);
                 //   subtitleUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/CastVideos/tracks/DesigningForGoogleCast-en.vtt";
-                /*
-                if (subtitleParsed.ContainsKey(subtitleUrl)) {
-                    subtitleUrl = subtitleParsed[subtitleUrl];
-                    print("SUBURL:::" + subtitleUrl);
-                }
-                else {
-                    //  print("SUBTITLEURL:::: " + subtitleUrl);
-                    if (subtitleUrl != "") { 
-                        string _subtitleUrl = GetUrlFromUploadSubtitles(subtitleUrl, ".vtt");
-                        subtitleParsed.Add(subtitleUrl, _subtitleUrl);
-                        print("SUBURL:::" + subtitleUrl);
-                        subtitleUrl = _subtitleUrl;
-                    }
-                }*/
+
 
                 // SUBTITLES
-                if (subtitleUrl != "") {
+                if (realSub != "") {
                     validSubtitle = true;
                     mediaInfo.Tracks = new Track[]
                                 {
-                                 new Track() {  TrackId = 1, Language = "en-US" , Name = subtitleName, TrackContentId = subtitleUrl,SubType=TextTrackType.Subtitles,Type=TrackType.Text}
+                                 new Track() {  TrackId = 1, Language = "en-US" , Name = subtitleName, TrackContentId = realSub,SubType=TextTrackType.Subtitles,Type=TrackType.Text}
                                 };
                     mediaInfo.TextTrackStyle = new TextTrackStyle() {
+                        FontFamily = "Open Sans",
                         BackgroundColor = System.Drawing.Color.Transparent,//.Color.Transparent,
                         EdgeColor = System.Drawing.Color.Black,
-                        EdgeType = TextTrackEdgeType.DropShadow
+                        EdgeType = TextTrackEdgeType.Outline,
+                        FontScale = 1.05f,
                     };
                 }
                 mediaMetadata.Title = mirrorName;
@@ -656,7 +848,6 @@ namespace CloudStreamForms
                     SetChromeTime(setTime);
                 }
                 CurrentChannel.StatusChanged += ChromeChannel_StatusChanged;
-                print("!3");
 
                 castUpdatedNow = DateTime.Now;
                 castLastUpdate = 0;
@@ -6303,16 +6494,15 @@ namespace CloudStreamForms
             return topLists.ToList();
         }
 
-        public void QuickSearch(string text, bool purgeCurrentSearchThread = true, bool onlySearch = true)
+        public async Task QuickSearch(string text, bool purgeCurrentSearchThread = true, bool onlySearch = true, bool blocking = false)
         {
-
+            print("QUICKSEARCHI G:: " + text);
             if (purgeCurrentSearchThread) {
                 PurgeThreads(1);
             }
-
             TempThread tempThred = CreateThread(1);
-
-            StartThread("QuickSearch", () => {
+            bool done = false;
+            ThreadStart o = () => {
                 try {
                     Regex rgx = new Regex("[^a-zA-Z0-9 -]");
                     text = rgx.Replace(text, "").ToLower();
@@ -6376,9 +6566,18 @@ namespace CloudStreamForms
                     }
                 }
                 finally {
+                    done = true;
                     JoinThred(tempThred);
                 }
-            });
+            };
+
+            StartThread("QuickSearch", o);
+
+            if (blocking) {
+                while (!done) {
+                    await Task.Delay(10);
+                }
+            }
         }
 
         public static string RemoveHtmlChars(string inp)
@@ -7165,15 +7364,31 @@ namespace CloudStreamForms
         }
 
 
+        public static readonly string[] subtitleNames = new string[] {
+            "Svenska","Abkhazian","Afrikaans","Albanian","Arabic","Aragonese","Armenian","Assamese","Asturian","Azerbaijani","Basque","Belarusian","Bengali","Bosnian","Breton","Bulgarian","Burmese","Catalan","Chinese (simplified)","Chinese (traditional)","Chinese bilingual","Croatian","Czech","Danish","Dutch","English","Esperanto","Estonian","Extremaduran","Finnish","French","Gaelic","Galician","Georgian","German","Greek","Hebrew","Hindi","Hungarian","Icelandic","Igbo","Indonesian","Interlingua","Irish","Italian","Japanese","Kannada","Kazakh","Khmer","Korean","Kurdish","Latvian","Lithuanian","Luxembourgish","Macedonian","Malay","Malayalam","Manipuri","Mongolian","Montenegrin","Navajo","Northern Sami","Norwegian","Occitan","Odia","Persian","Polish","Portuguese","Portuguese (BR)","Portuguese (MZ)","Romanian","Russian","Serbian","Sindhi","Sinhalese","Slovak","Slovenian","Somali","Spanish","Spanish (EU)","Spanish (LA)","Swahili","Syriac","Tagalog","Tamil","Tatar","Telugu","Thai","Turkish","Turkmen","Ukrainian","Urdu","Vietnamese",
+        };
+
+        public static readonly string[] subtitleShortNames = new string[] {
+            "swe","abk","afr","alb","ara","arg","arm","asm","ast","aze","baq","bel","ben","bos","bre","bul","bur","cat","chi","zht","zhe","hrv","cze","dan","dut","eng","epo","est","ext","fin","fre","gla","glg","geo","ger","ell","heb","hin","hun","ice","ibo","ind","ina","gle","ita","jpn","kan","kaz","khm","kor","kur","lav","lit","ltz","mac","may","mal","mni","mon","mne","nav","sme","nor","oci","ori","per","pol","por","pob","pom","rum","rus","scc","snd","sin","slo","slv","som","spa","spn","spl","swa","syr","tgl","tam","tat","tel","tha","tur","tuk","ukr","urd","vie",
+        };
+
+        public static Dictionary<string, string> cachedSubtitles = new Dictionary<string, string>();
 
         /// <summary>
-        /// RETURN SUBTITLE STRING
+        /// RETURN SUBTITLE STRING, BLOCKING ACTION, see subtitleNames and subtitleShortNames
         /// </summary>
         /// <param name="imdbTitleId"></param>
         /// <param name="lang"></param>
         /// <returns></returns>
-        public string DownloadSubtitle(string imdbTitleId, string lang = "eng", bool showToast = true)
+        public string DownloadSubtitle(string imdbTitleId, string lang = "eng", bool showToast = true, bool cacheSubtitles = true)
         {
+            string cacheKey = imdbTitleId + lang;
+            if (cacheSubtitles) {
+                if (cachedSubtitles.ContainsKey(cacheKey)) {
+                    return cachedSubtitles[cacheKey];
+                }
+            }
+
             try {
                 string rUrl = "https://www.opensubtitles.org/en/search/sublanguageid-" + lang + "/imdbid-" + imdbTitleId + "/sort-7/asc-0"; // best match first
                                                                                                                                             //print(rUrl);
@@ -7197,11 +7412,11 @@ namespace CloudStreamForms
                         }
                     }
                     s = s.Replace("\n\n", "");
-                    /*if (!s.StartsWith("WEBVTT")) {
-                        s = "WEBVTT\n\n" + s; // s.Insert(0, "WEBVTT\n");
-                    }*/
                     if (showToast) {
                         App.ShowToast("Subtitles Downloaded");
+                    }
+                    if (s.Length > 100) { // MUST BE CORRECT
+                        cachedSubtitles[cacheKey] = s;
                     }
                     return s;
                 }

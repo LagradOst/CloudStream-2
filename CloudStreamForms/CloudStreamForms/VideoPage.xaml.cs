@@ -151,62 +151,9 @@ namespace CloudStreamForms
 
         public void OnSubtitlesAdded(string _inp)
         {
-            ParsedSubtitles.Add(ParseSubtitles(_inp).ToArray());
+            ParsedSubtitles.Add(MainChrome.ParseSubtitles(_inp).ToArray());
         }
-        static bool ContainsStartColor(string inp)
-        {
-            return inp.Contains("<font color=");
-        }
-        public static List<SubtitleItem> ParseSubtitles(string _inp)
-        {
-            var parser = GetSubtiteParser(_inp);
-            byte[] byteArray = Encoding.UTF8.GetBytes(_inp);
-            MemoryStream stream = new MemoryStream(byteArray);
-            return parser.ParseStream(stream, Encoding.UTF8).Select(t => {
-
-                // REMOVE BLOAT
-                for (int i = 0; i < t.Lines.Count; i++) {
-                    var inp = t.Lines[i];
-                    while (ContainsStartColor(inp)) {
-                        t.Lines[i] = inp.Replace($"<font color=\"{FindHTML(inp, "<font color=\"", "\"")}\">", "");
-                    }
-                }
-
-                t.Lines = t.Lines.Select(_t => _t.Replace("<i>", "").Replace("{i}", "").Replace("<b>", "").Replace("{b}", "").Replace("<u>", "").Replace("{u}", "").Replace("</i>", "").Replace("{/i}", "").Replace("</b>", "").Replace("{/b}", "").Replace("</u>", "").Replace("{/u}", "").Replace("</font>", "")).ToList();
-                return t;
-            }).ToList();
-        }
-
-        public static ISubtitlesParser GetSubtiteParser(string _inp)
-        {
-            while (_inp.StartsWith(" ") || _inp.StartsWith("\n")) {
-                _inp = _inp.Remove(0, 1);
-            }
-
-            if (_inp.StartsWith("[INFORMATION]")) {
-                return new SubViewerParser();
-            }
-            else if (_inp.StartsWith("WEBVTT")) {
-                return new VttParser();
-            }
-            else if (_inp.StartsWith("<?xml version=\"")) {
-                return new TtmlParser();
-            }
-            else if (_inp.StartsWith("[Script Info]") || _inp.StartsWith("Title:")) {
-                return new SsaParser();
-            }
-            else if (_inp.StartsWith("1")) {
-                return new SrtParser();
-            }
-            else if (_inp.StartsWith("0:00")) {
-                return new YtXmlFormatParser();
-            }
-            else {
-                return new SrtParser();
-            }
-        }
-
-
+       
         public void SelectMirror(int mirror)
         {
             if (lastUrl == AllMirrorsUrls[mirror]) return;

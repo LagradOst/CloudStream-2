@@ -60,10 +60,12 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <ImageButton x:Name="PlayList" Grid.Column="0" BackgroundColor="Transparent"  Scale="{Binding ScaleAll}"  ></ImageButton>
-                        <ImageButton x:Name="StopAll" Grid.Column="1" BackgroundColor="Transparent" Scale="{Binding ScaleAllBig}"  Margin="10"  ></ImageButton>
-                        <ImageButton x:Name="Audio" Grid.Column="2" BackgroundColor="Transparent"  Scale="1.3"  Clicked="AudioClicked"></ImageButton>
+                            <ImageButton x:Name="Subbutton" Grid.Column="1" BackgroundColor="Transparent"  Scale="1.2"  Clicked="SubClicked"></ImageButton>
+                        <ImageButton x:Name="StopAll" Grid.Column="2" BackgroundColor="Transparent" Scale="{Binding ScaleAllBig}"  Margin="10"  ></ImageButton>
+                        <ImageButton x:Name="Audio" Grid.Column="3" BackgroundColor="Transparent"  Scale="1.3"  Clicked="AudioClicked"></ImageButton>
                     </Grid>
                     <Grid HorizontalOptions="Center" ColumnSpacing="20" >
                         <Grid.ColumnDefinitions >

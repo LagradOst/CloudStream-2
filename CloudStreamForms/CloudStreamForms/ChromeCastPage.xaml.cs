@@ -1,8 +1,11 @@
 ﻿using CloudStreamForms.Models;
 using Rg.Plugins.Popup.Services;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Xamarin.Forms;
+using Xamarin.Forms.Internals;
 using Xamarin.Forms.Xaml;
 using XamEffects;
 using static CloudStreamForms.App;
@@ -40,6 +43,134 @@ namespace CloudStreamForms
         public static int currentSelected = 0;
         public static double changeTime = -1;
 
+        object subtitleMutex = new object();
+        public List<Subtitle> subtitles = new List<Subtitle>();
+        public int subtitleIndex = -1;
+        public bool HasSubtitlesOn = false;
+        public int subtitleDelay = 0;
+
+        public async void SelectSubtitleOption()
+        {
+            List<string> options = new List<string>();
+            if (subtitles.Count == 0) {
+                options.Add("Download Subtitles (English)");
+            }
+            else {
+                // if (subtitleIndex != -1) {
+                // options.Add($"Turn {(HasSubtitlesOn ? "Off" : $"On ({subtitles[subtitleIndex].name})")}");
+                //}
+                if (HasSubtitlesOn) {
+                    if (subtitleIndex != -1) {
+                        options.Add($"Turn off");
+                    }
+                    options.Add($"Change Delay ({subtitleDelay} ms)");
+                }
+                options.Add("Select Subtitle");
+            }
+            options.Add("Download Subtitles");
+
+            async Task UpdateSubtitles()
+            {
+                ActionPopup.StartIndeterminateLoadinbar("Loading Subtitles...");
+                if (subtitleIndex != -1) {
+                    await ChangeSubtitles(subtitles[subtitleIndex].data, subtitles[subtitleIndex].name, subtitleDelay);
+                }
+                else {
+                    await ChangeSubtitles("", "", 0);
+                }
+                await ActionPopup.StopIndeterminateLoadinbar();
+            }
+
+            string action = await ActionPopup.DisplayActionSheet("Subtitles", options.ToArray());
+            if (action == "Download Subtitles") {
+                string subAction = await ActionPopup.DisplayActionSheet("Download Subtitles", subtitleNames);
+                if (subAction != "Cancel") {
+                    int index = subtitleNames.IndexOf(subAction);
+                    PopulateSubtitle(subtitleShortNames[index], subAction);
+                }
+            }
+            else if (action == "Select Subtitle") {
+                string subAction = await ActionPopup.DisplayActionSheet("Select Subtitle", subtitles.Select(t => t.name).ToArray());
+
+                if (subAction != "Cancel") {
+                    for (int i = 0; i < subtitles.Count; i++) {
+                        if (subtitles[i].name == subAction) {
+                            subtitleIndex = i;
+                            HasSubtitlesOn = true;
+                            await Task.Delay(100);
+                            await UpdateSubtitles();
+                        }
+                    }
+                }
+            }
+            else if (action == "Download Subtitles (English)") {
+                PopulateSubtitle();
+            }
+            else if (action.StartsWith("Turn off")) {
+                subtitleIndex = -1;
+                await UpdateSubtitles();
+                // await MainChrome.ToggleSubtitles(!HasSubtitlesOn);
+                HasSubtitlesOn = !HasSubtitlesOn;
+            }
+            else if (action.StartsWith("Change Delay")) {
+                int del = await ActionPopup.DisplayIntEntry("ms", "Subtitle Delay", 50, false, subtitleDelay.ToString(), "Set Delay");
+                if (del != -1) {
+                    subtitleDelay = del;
+                    await Task.Delay(100);
+                    await UpdateSubtitles();
+                }
+            }
+        }
+
+        Dictionary<string, bool> searchingForLang = new Dictionary<string, bool>();
+
+        public void PopulateSubtitle(string lang = "eng", string name = "English")
+        {
+            bool ContainsLang()
+            {
+                lock (subtitleMutex) {
+                    return subtitles.Where(t => t.name == name).Count() != 0;
+                }
+            }
+
+            if (ContainsLang()) {
+                App.ShowToast("Subtitle already downloaded"); // THIS SHOULD NEVER HAPPEND
+                return;
+            }
+
+            if (searchingForLang.ContainsKey(lang)) {
+                App.ShowToast("Searching for subtitles");
+                return;
+            }
+            searchingForLang[lang] = true;
+
+            var thread = mainCore.CreateThread(6);
+            mainCore.StartThread("PopulateSubtitles", () => {
+                try {
+                    string data = mainCore.DownloadSubtitle(chromeMovieResult.title.id, lang, false, true);
+                    if (data.IsClean()) {
+                        if (!ContainsLang()) {
+                            lock (subtitleMutex) {
+                                Subtitle s = new Subtitle();
+                                s.name = name;
+                                s.data = data;
+                                subtitles.Add(s);
+                            }
+                            App.ShowToast(name + " subtitles added");
+                        }
+                    }
+                    else {
+                        App.ShowToast("Error Downloading Subtitles");
+                    }
+                }
+                finally {
+                    if (searchingForLang.ContainsKey(lang)) {
+                        searchingForLang.Remove(lang);
+                    }
+                }
+            });
+        }
+
         async void SelectMirror()
         {
             bool succ = false;
@@ -70,7 +201,11 @@ namespace CloudStreamForms
                         print("CHANGE TIME TO " + changeTime);
                     }
 
-                    succ = await MainChrome.CastVideo(episodeResult.mirrosUrls[currentSelected], episodeResult.Mirros[currentSelected], subtitleUrl: _sub, posterUrl: chromeMovieResult.title.hdPosterUrl, movieTitle: chromeMovieResult.title.name, setTime: changeTime);
+                    string subTxt = "";
+                    if (subtitleIndex != -1 && HasSubtitlesOn) {
+                        subTxt = subtitles[subtitleIndex].data;
+                    }
+                    succ = await MainChrome.CastVideo(episodeResult.mirrosUrls[currentSelected], episodeResult.Mirros[currentSelected], subtitleUrl: subTxt, posterUrl: chromeMovieResult.title.hdPosterUrl, movieTitle: chromeMovieResult.title.name, setTime: changeTime, subtitleDelay: subtitleDelay);
 
                 }
             }
@@ -114,6 +249,7 @@ namespace CloudStreamForms
             UpdateTxt();
         }
 
+        static string lastId = "";
 
         public ChromeCastPage()
         {
@@ -122,6 +258,15 @@ namespace CloudStreamForms
             chromeMovieResult = MovieResult.chromeMovieResult;
 
             InitializeComponent();
+
+            if (lastId != chromeMovieResult.title.id) {
+                lastId = chromeMovieResult.title.id;
+                if (globalSubtitlesEnabled) {
+                    PopulateSubtitle();
+                }
+            }
+
+            Subbutton.Source = App.GetImageSource("outline_subtitles_white_48dp.png");
             BindingContext = this;
             TitleName = chromeMovieResult.title.name;
             EpisodeTitleName = episodeResult.Title;
@@ -303,6 +448,19 @@ namespace CloudStreamForms
         {
             PopupNavigation.Instance.PushAsync(new CloudStreamForms.MyPopupPage());
             ScaleAudio();
+        }
+
+        private void SubClicked(object sender, EventArgs e)
+        {
+            ScaleSub();
+            SelectSubtitleOption();
+        }
+
+        async void ScaleSub()
+        {
+            Subbutton.AbortAnimation("ScaleTo");
+            await Subbutton.ScaleTo(1.3, 100, Easing.SinOut);
+            await Subbutton.ScaleTo(1.2, 100, Easing.SinOut);
         }
 
         async void ScaleAudio()

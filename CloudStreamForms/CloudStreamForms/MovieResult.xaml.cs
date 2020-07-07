@@ -1267,116 +1267,8 @@ namespace CloudStreamForms
                 DubPicker.ItemsSource.Clear();
 
                 // SET DUB SUB
-                if (isAnime) {
-                    bool dubExists = false;
-                    bool subExists = false;
-                    try {
-                        for (int q = 0; q < currentMovie.title.MALData.seasonData[currentSeason].seasons.Count; q++) {
-                            MALSeason ms = currentMovie.title.MALData.seasonData[currentSeason].seasons[q];
-                            try {
-                                if (ms.watchMovieAnimeData.dubExists) {
-                                    dubExists = true;
-                                }
-                                if (ms.watchMovieAnimeData.subExists) {
-                                    subExists = true;
-                                }
-                            }
-                            catch (Exception) { }
-                            try {
-                                if (ms.kissanimefreeData.dubExists) {
-                                    dubExists = true;
-                                }
-                                if (ms.kissanimefreeData.subExists) {
-                                    subExists = true;
-                                }
-                            }
-                            catch (Exception) { }
-                            try {
-                                if (ms.kickassAnimeData.dubExists) {
-                                    dubExists = true;
-                                }
-                                if (ms.kickassAnimeData.subExists) {
-                                    subExists = true;
-                                }
-                            }
-                            catch (Exception) { }
-                            try {
-                                if (ms.dubbedAnimeNetData.dubExists) {
-                                    dubExists = true;
-                                }
-                                if (ms.dubbedAnimeNetData.subExists) {
-                                    subExists = true;
-                                }
-                            }
-                            catch (Exception) { }
-
-
-
-                            try {
-                                if (ms.animeSimpleData.dubbedEpisodes > 0) {
-                                    dubExists = true;
-                                }
-                                if (ms.animeSimpleData.subbedEpisodes > 0) {
-                                    subExists = true;
-                                }
-                            }
-                            catch (Exception) { }
-
-                            try {
-                                if (ms.animekisaData.dubExists) {
-                                    dubExists = true;
-                                }
-                                if (ms.animekisaData.subExists) {
-                                    subExists = true;
-                                }
-                            }
-                            catch (Exception) { }
-                            try {
-                                if (ms.animeFlixData.dubExists) {
-                                    dubExists = true;
-                                }
-                                if (ms.animeFlixData.subExists) {
-                                    subExists = true;
-                                }
-                            }
-                            catch (Exception) { }
-
-                            try {
-                                if (ms.animedreamData.dubExists) {
-                                    dubExists = true;
-                                }
-                                if (ms.animedreamData.subExists) {
-                                    subExists = true;
-                                }
-                            }
-                            catch (Exception) { }
-                            try {
-                                if (ms.dubbedAnimeData.dubExists) {
-                                    dubExists = true;
-                                }
-                            }
-                            catch (Exception) { }
-                            try {
-                                if (ms.gogoData.dubExists) {
-                                    dubExists = true;
-                                }
-                                if (ms.gogoData.subExists) {
-                                    subExists = true;
-                                }
-                            }
-                            catch (Exception) { }
-                            try {
-                                if (ms.kickassAnimeData.dubExists) {
-                                    dubExists = true;
-                                }
-                                if (ms.kickassAnimeData.subExists) {
-                                    subExists = true;
-                                }
-                            }
-                            catch (Exception) { }
-                        }
-                    }
-                    catch (Exception) { }
+                if (isAnime) { 
+                    mainCore.GetSubDub(currentSeason, out bool subExists, out bool dubExists);
 
                     isDub = dubExists;
 
@@ -1435,17 +1327,7 @@ namespace CloudStreamForms
                     int max = mainCore.GetMaxEpisodesInAnimeSeason(currentSeason, isDub, tempThred);
                     if (max > 0) {
                         print("CLEAR AND ADD");
-                        MainThread.BeginInvokeOnMainThread(() => {
-                            /*
-                            try {
-                                DubBtt.Text = DubPicker.ItemsSource[DubPicker.SelectedIndex];
-                            }
-                            catch (Exception) {
-
-                            }*/
-
-                            //  DubBtt.IsVisible = DubPicker.IsVisible;
-
+                        MainThread.BeginInvokeOnMainThread(() => { 
                             // CLEAR EPISODES SO SWITCHING SUB DUB 
                             try {
                                 for (int i = 0; i < epView.MyEpisodeResultCollection.Count; i++) {
@@ -1801,14 +1683,15 @@ namespace CloudStreamForms
                         succ = true;
                     }
                     else {
+                        /*
                         string _sub = "";
                         if (currentMovie.subtitles != null) {
                             if (currentMovie.subtitles.Count > 0) {
                                 _sub = currentMovie.subtitles[0].data;
                             }
-                        }
+                        }*/
 
-                        succ = await MainChrome.CastVideo(episodeResult.mirrosUrls[count], episodeResult.Mirros[count], subtitleUrl: _sub, posterUrl: currentMovie.title.hdPosterUrl, movieTitle: currentMovie.title.name);
+                        succ = await MainChrome.CastVideo(episodeResult.mirrosUrls[count], episodeResult.Mirros[count], subtitleUrl: "", posterUrl: currentMovie.title.hdPosterUrl, movieTitle: currentMovie.title.name, subtitleDelay:0);
                     }
                 }
                 ChromeCastPage.currentSelected = count;
