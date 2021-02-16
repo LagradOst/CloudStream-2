@@ -381,7 +381,7 @@ namespace CloudStreamForms.Pages
 						Settings.VideoDownloadTvSeries = loc;
 					}
 				}),
-				new SettingsItem() { img= "outline_get_app_white_48dp.png",mainTxt="Experamental m3u8 downloader",descriptTxt="Very limited support" ,VarName = nameof(Settings.PremitM3u8Download)},
+				new SettingsItem() { img= "outline_get_app_white_48dp.png",mainTxt="Experimental m3u8 downloader",descriptTxt="Very limited support" ,VarName = nameof(Settings.PremitM3u8Download)},
 				new SettingsItem() { img= "outline_get_app_white_48dp.png",mainTxt="Check download link",descriptTxt="" ,VarName = nameof(Settings.CheckDownloadLinkBefore)},
 #if DEBUG
 				new SettingsItem() { img= "round_build_white_48dp.png",mainTxt="Database publisher",descriptTxt="" ,VarName = nameof(Settings.IsDatabasePublisher)},
